@@ -20,9 +20,18 @@ package org.eclipse.jface.preference;
  */
 public final class JFacePreferences {
 
+	public static String PLUGIN_STRING_FOR_ICONS = "IconsPlugin2"; //$NON-NLS-1$
+	public static String ICON_THEME = "modern"; //$NON-NLS-1$
 	/**
 	 * Identifier for the Error Color
 	 */
+	public static void setPLugin(String s) {
+		PLUGIN_STRING_FOR_ICONS = s;
+	}
+
+	public static void setTheme(String s) {
+		ICON_THEME = s;
+	}
 	public static final String ERROR_COLOR = "ERROR_COLOR"; //$NON-NLS-1$
 
 	/**

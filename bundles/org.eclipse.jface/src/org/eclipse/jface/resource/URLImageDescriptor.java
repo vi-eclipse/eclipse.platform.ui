@@ -137,6 +137,7 @@ class URLImageDescriptor extends ImageDescriptor implements IAdaptable {
 	}
 
 	private static ImageData getImageData(String url, int zoom) {
+
 		URL tempURL = getURL(url);
 		if (tempURL != null) {
 			if (zoom == 100) {
@@ -359,6 +360,13 @@ class URLImageDescriptor extends ImageDescriptor implements IAdaptable {
 	}
 
 	private static URL getURL(String urlString) {
+		String s = getThemedURL(urlString);
+		try {
+			return new URL(s);
+		} catch (MalformedURLException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		URL result = null;
 		try {
 			result = new URL(urlString);
@@ -366,6 +374,82 @@ class URLImageDescriptor extends ImageDescriptor implements IAdaptable {
 			Policy.getLog().log(new Status(IStatus.ERROR, Policy.JFACE, e.getLocalizedMessage(), e));
 		}
 		return result;
+	}
+
+	/**
+	 * gets the URL which points to the the Icon-Theme if the icon exists in the
+	 * theme
+	 *
+	 * @param urlString the default path URL to the icon
+	 * @return the modified URL if the icon exists in the theme or the default URL
+	 */
+	private static String getThemedURL(String urlString) {
+		// theme name will come from Preferences in the future!
+		String themeName = "modern" + "/"; //$NON-NLS-1$ //$NON-NLS-2$
+//		String themeName = "";
+
+		URL returnUrl = null;
+		try {
+			URL initialUrl = new URL(urlString);
+			boolean isBundleentry = initialUrl.getProtocol().equals("bundleentry"); //$NON-NLS-1$
+			if (isBundleentry) {
+				returnUrl = getBundleentryURL(initialUrl);
+				return returnUrl.toExternalForm();
+			}
+			String path = initialUrl.getPath();
+			// without it does not work yet, I don´t know how important it is
+			String editedPath = path.replace("$nl$/", ""); //$NON-NLS-1$ //$NON-NLS-2$
+
+			String[] urlParts = editedPath.split("/"); //$NON-NLS-1$
+
+			String themedPath = ""; //$NON-NLS-1$
+			// i = 2 is the plugin name, after that the path within the plugin (which has to
+			// be modified) starts
+
+			for (int i = 0; i < urlParts.length; i++) {
+				if (i != 3 && i != urlParts.length - 1) {
+					themedPath = themedPath + urlParts[i] + "/"; //$NON-NLS-1$
+				} else if (i == urlParts.length - 1) {
+					themedPath = themedPath + urlParts[i];
+				} else {
+					themedPath = themedPath + themeName + urlParts[i] + "/"; //$NON-NLS-1$
+				}
+			}
+
+			URL themeURL = new URL(initialUrl.getProtocol() + ":" + themedPath); //$NON-NLS-1$
+			try (InputStream stream = themeURL.openStream()) {
+				returnUrl = themeURL;
+			} catch (Exception e) {
+				returnUrl = initialUrl;
+			}
+			return returnUrl.toExternalForm();
+		} catch (Exception e) {
+			return urlString;
+		}
+	}
+
+	/**
+	 * Handles the bundleentry URL´s.
+	 *
+	 * @param url the url with bundleentry
+	 * @return the modified URL which gets the icon from the theme rather than the
+	 *         default
+	 */
+	private static URL getBundleentryURL(URL url) {
+		// themeName has to be replaced by Preferences.getTheme
+		String themeName = "/" + "modern"; //$NON-NLS-1$ //$NON-NLS-2$
+//		String themeName = "";
+
+		URL url1 = null;
+		String path = url.getPath();
+		path = themeName + path;
+		try {
+			url1 = new URL(url.getProtocol() + "://" + url.getHost() + path); //$NON-NLS-1$
+			url1.openStream();
+			url = url1;
+		} catch (Exception e) {
+		}
+		return url;
 	}
 
 	@Override

@@ -151,6 +151,7 @@ public class SupportTray extends DialogTray implements ISelectionChangedListener
 	}
 
 	private ImageGcDrawer createCloseButtonDrawer(Color fillColor, Color borderColor) {
+		System.out.println("Hola");
 		int[] closeButtonPolygon = new int[] { 3, 3, 5, 3, 7, 5, 8, 5, 10, 3, 12, 3, 12, 5, 10, 7, 10, 8, 12, 10, 12,
 				12, 10, 12, 8, 10, 7, 10, 5, 12, 3, 12, 3, 10, 5, 8, 5, 7, 3, 5 };
 		return new ImageGcDrawer() {

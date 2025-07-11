@@ -15,7 +15,6 @@ package org.eclipse.jface.text.reconciler;
 
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.IProgressMonitor;
-import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
@@ -56,7 +55,7 @@ abstract public class AbstractReconciler implements IReconciler {
 	/**
 	 * Background thread for the reconciling activity.
 	 */
-	private class BackgroundThread extends Job {
+	class BackgroundThread extends Thread {
 
 		/** Has the reconciler been canceled. */
 		private boolean fCanceled= false;
@@ -67,9 +66,7 @@ abstract public class AbstractReconciler implements IReconciler {
 		/** Is a reconciling strategy active. */
 		private boolean fIsActive= false;
 
-		private volatile boolean fIsAlive;
-
-		private boolean started;
+		private boolean fStarted;
 
 		/**
 		 * Creates a new background thread. The thread
@@ -79,8 +76,8 @@ abstract public class AbstractReconciler implements IReconciler {
 		 */
 		public BackgroundThread(String name) {
 			super(name);
-			setPriority(Job.DECORATE);
-			setSystem(true);
+			setPriority(Thread.MIN_PRIORITY);
+			setDaemon(true);
 		}
 
 		/**
@@ -105,7 +102,7 @@ abstract public class AbstractReconciler implements IReconciler {
 		/**
 		 * Cancels the background thread.
 		 */
-		public void doCancel() {
+		public void cancel() {
 			fCanceled= true;
 			IProgressMonitor pm= fProgressMonitor;
 			if (pm != null)
@@ -160,9 +157,7 @@ abstract public class AbstractReconciler implements IReconciler {
 					fDirtyRegionQueue.notifyAll();
 				}
 			}
-			synchronized (this) {
-				started= false;
-			}
+
 			informNotFinished();
 			reconcilerReset();
 		}
@@ -176,12 +171,12 @@ abstract public class AbstractReconciler implements IReconciler {
 		 * </p>
 		 */
 		@Override
-		public IStatus run(IProgressMonitor monitor) {
-			fIsAlive= true;
+		public void run() {
+
 			delay();
 
 			if (fCanceled)
-				return Status.CANCEL_STATUS;
+				return;
 
 			initialProcess();
 
@@ -226,24 +221,30 @@ abstract public class AbstractReconciler implements IReconciler {
 
 				fIsActive= false;
 			}
-			fIsAlive= false;
-			return Status.OK_STATUS;
 		}
 
-		public boolean isAlive() {
-			return fIsAlive;
-		}
-
-		public synchronized void start() {
-			if (!started) {
-				started= true;
-				schedule();
+		public void startReconciling() {
+			if (!isAlive()) {
+				if (fStarted) {
+					return;
+				}
+				fStarted= true;
+				Job.createSystem("Delayed Reconciler startup", m -> { //$NON-NLS-1$
+					try {
+						start();
+						return Status.OK_STATUS;
+					} catch (IllegalThreadStateException e) {
+						// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=40549
+						// This is the only instance where the thread is started; since
+						// we checked that it is not alive, it must be dead already due
+						// to a run-time exception or error. Exit.
+						return Status.CANCEL_STATUS;
+					}
+				}).schedule();
+			} else {
+				reset();
 			}
-		}
 
-		@Override
-		public boolean belongsTo(Object family) {
-			return family == fViewer || AbstractReconciler.class == family;
 		}
 	}
 
@@ -260,7 +261,7 @@ abstract public class AbstractReconciler implements IReconciler {
 		public void documentChanged(DocumentEvent e) {
 
 			if (fThread.isActive() || !fThread.isDirty() && fThread.isAlive()) {
-				if (!fIsAllowedToModifyDocument && isRunningInReconcilerThread())
+				if (!fIsAllowedToModifyDocument && Thread.currentThread() == fThread)
 					throw new UnsupportedOperationException("The reconciler thread is not allowed to modify the document"); //$NON-NLS-1$
 				aboutToBeReconciledInternal();
 			}
@@ -512,7 +513,7 @@ abstract public class AbstractReconciler implements IReconciler {
 				// http://dev.eclipse.org/bugs/show_bug.cgi?id=19135
 				BackgroundThread bt= fThread;
 				fThread= null;
-				bt.doCancel();
+				bt.cancel();
 			}
 		}
 	}
@@ -640,11 +641,7 @@ abstract public class AbstractReconciler implements IReconciler {
 		if (fThread == null)
 			return;
 
-		if (!fThread.isAlive()) {
-			fThread.start();
-		} else {
-			fThread.reset();
-		}
+		fThread.startReconciling();
 	}
 
 	/**
@@ -660,10 +657,7 @@ abstract public class AbstractReconciler implements IReconciler {
 	 * @return <code>true</code> if running in this reconciler's background thread
 	 * @since 3.4
 	 */
-	protected synchronized boolean isRunningInReconcilerThread() {
-		if (fThread == null) {
-			return false;
-		}
-		return Job.getJobManager().currentJob() == fThread;
+	protected boolean isRunningInReconcilerThread() {
+		return Thread.currentThread() == fThread;
 	}
 }

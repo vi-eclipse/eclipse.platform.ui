@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Point;
@@ -37,6 +38,8 @@ import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.text.IFindReplaceTarget;
 import org.eclipse.jface.text.IMultiTextSelection;
 import org.eclipse.jface.text.TextViewer;
+
+import org.eclipse.e4.ui.model.application.ui.basic.MPartStack;
 
 import org.eclipse.ui.internal.findandreplace.FindReplaceUITest;
 import org.eclipse.ui.internal.findandreplace.SearchOptions;
@@ -313,5 +316,69 @@ public class FindReplaceOverlayTest extends FindReplaceUITest<OverlayAccess> {
 		dialog.assertSelected(SearchOptions.GLOBAL);
 	}
 
+	@Test
+	public void testStackSettingsAreAppliedCorrectly() {
+		initializeTextViewerWithFindReplaceUI("foo bar");
+		OverlayAccess dialog= getDialog();
+
+		OverlaySearchSettings settings= new OverlaySearchSettings("foo", "", true, true, false, false, false, false);
+
+		Accessor actionAccessor= new Accessor(getFindReplaceAction(), FindReplaceAction.class);
+		FindReplaceOverlay overlay= (FindReplaceOverlay) actionAccessor.get("overlay");
+		overlay.applyStackSettings(settings);
+
+		assertEquals("foo", dialog.getFindText());
+		dialog.assertSelected(SearchOptions.CASE_SENSITIVE);
+		dialog.assertUnselected(SearchOptions.REGEX);
+		dialog.assertSelected(SearchOptions.WHOLE_WORD);
+		dialog.assertSelected(SearchOptions.GLOBAL);
+		assertFalse(dialog.isReplaceDialogOpen());
+	}
+
+	@Test
+	public void testStackSettingsFromAnotherStackAreNotApplied() {
+		initializeTextViewerWithFindReplaceUI("foo bar");
+		OverlayAccess dialog= getDialog();
+
+		MPartStack fakeOtherStack= Mockito.mock(MPartStack.class);
+		OverlaySearchSettings otherStackSettings= new OverlaySearchSettings("from-other-stack", "", true, true, false,
+				false, false, false);
+		FindReplaceOverlayRegistry.putSettings(fakeOtherStack, otherStackSettings);
+
+		Accessor actionAccessor= new Accessor(getFindReplaceAction(), FindReplaceAction.class);
+		FindReplaceOverlay overlay= (FindReplaceOverlay) actionAccessor.get("overlay");
+		overlay.restoreOverlaySettings();
+
+		assertEquals("", dialog.getFindText(),
+				"Settings from a different stack must not be applied to this overlay");
+		dialog.assertUnselected(SearchOptions.CASE_SENSITIVE);
+		dialog.assertUnselected(SearchOptions.WHOLE_WORD);
+	}
+
+	@Test
+	public void testStackSettingsAreUpdatedCorrectly() {
+		initializeTextViewerWithFindReplaceUI("foo bar");
+		OverlayAccess dialog= getDialog();
+
+		dialog.setFindText("foo");
+		dialog.select(SearchOptions.CASE_SENSITIVE);
+		assertEquals("foo", dialog.getFindText());
+		dialog.assertSelected(SearchOptions.CASE_SENSITIVE);
+
+		OverlaySearchSettings updatedSettings= new OverlaySearchSettings("bar", "", false, true, false, false, false,
+				false);
+
+		Accessor actionAccessor= new Accessor(getFindReplaceAction(), FindReplaceAction.class);
+		FindReplaceOverlay overlay= (FindReplaceOverlay) actionAccessor.get("overlay");
+		overlay.applyStackSettings(updatedSettings);
+
+		assertEquals("bar", dialog.getFindText(),
+				"The find text must be updated to reflect the new stack settings");
+		dialog.assertUnselected(SearchOptions.CASE_SENSITIVE);
+		dialog.assertSelected(SearchOptions.WHOLE_WORD);
+		dialog.assertUnselected(SearchOptions.REGEX);
+		dialog.assertSelected(SearchOptions.GLOBAL);
+		assertFalse(dialog.isReplaceDialogOpen());
+	}
 
 }

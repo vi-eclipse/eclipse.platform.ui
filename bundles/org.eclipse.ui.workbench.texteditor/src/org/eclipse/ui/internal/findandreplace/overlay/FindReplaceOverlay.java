@@ -17,6 +17,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.osgi.framework.FrameworkUtil;
 
+import org.eclipse.e4.ui.model.application.ui.MUIElement;
+import org.eclipse.e4.ui.model.application.ui.basic.MPart;
+import org.eclipse.e4.ui.model.application.ui.basic.MPartStack;
+
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.BusyIndicator;
 import org.eclipse.swt.custom.StyledText;
@@ -55,8 +59,12 @@ import org.eclipse.jface.text.FindReplaceDocumentAdapterContentProposalProvider;
 import org.eclipse.jface.text.IFindReplaceTarget;
 import org.eclipse.jface.text.ITextViewer;
 
+import org.eclipse.ui.IPartListener2;
+import org.eclipse.ui.IPartService;
 import org.eclipse.ui.IWorkbenchCommandConstants;
 import org.eclipse.ui.IWorkbenchPart;
+import org.eclipse.ui.IWorkbenchPartReference;
+import org.eclipse.ui.IWorkbenchPartSite;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.fieldassist.ContentAssistCommandAdapter;
 import org.eclipse.ui.internal.SearchDecoration;
@@ -84,6 +92,15 @@ public class FindReplaceOverlay {
 
 	private final IFindReplaceLogic findReplaceLogic;
 	private final IWorkbenchPart targetPart;
+	/**
+	 * Guards against re-entrant saves while stack settings are being applied to
+	 * the UI controls (e.g. when switching tabs), since setting the widget state
+	 * triggers the very listeners that would otherwise persist the settings
+	 * again.
+	 */
+	private boolean isRestoringSettings = false;
+	private boolean partListenerRegistered = false;
+	private IPartListener2 stackMemberActivationListener;
 
 	private final Composite targetControl;
 	private Composite containerControl;
@@ -96,6 +113,10 @@ public class FindReplaceOverlay {
 	private HistoryTextWrapper searchBar;
 	private AccessibleToolBar searchTools;
 	private AccessibleToolBar closeTools;
+	private ToolItem searchInSelectionButton;
+	private ToolItem regexSearchButton;
+	private ToolItem caseSensitiveSearchButton;
+	private ToolItem wholeWordSearchButton;
 
 	private Composite replaceContainer;
 	private HistoryTextWrapper replaceBar;
@@ -211,8 +232,36 @@ public class FindReplaceOverlay {
 		customFocusOrder.install();
 		updateReplaceVisibility(false);
 		containerControl.setVisible(false);
+		if (targetPart != null) {
+			FindReplaceOverlayRegistry.registerOverlay(targetPart, this);
+			containerControl.addDisposeListener(__ -> FindReplaceOverlayRegistry.unregisterOverlay(targetPart));
+		}
 		PlatformUI.getWorkbench().getHelpSystem().setHelp(containerControl,
 				IAbstractTextEditorHelpContextIds.FIND_REPLACE_OVERLAY);
+	}
+
+	/**
+	 * Returns the existing {@link FindReplaceOverlay} for the given
+	 * {@code workbenchPart} if one already exists, otherwise creates and returns a
+	 * new one. This ensures that an overlay auto-opened during a tab switch can
+	 * later be reclaimed by the part's {@link FindReplaceAction} without creating a
+	 * duplicate.
+	 *
+	 * @param shell         the parent shell (used only when creating a new overlay)
+	 * @param workbenchPart the part for which the overlay is needed
+	 * @param target        the find/replace target (used only when creating a new
+	 *                      overlay)
+	 * @return an overlay for the given part
+	 */
+	public static FindReplaceOverlay getOrCreateForPart(Shell shell, IWorkbenchPart workbenchPart,
+			IFindReplaceTarget target) {
+		if (workbenchPart != null) {
+			FindReplaceOverlay existing = FindReplaceOverlayRegistry.getOverlay(workbenchPart);
+			if (existing != null && !existing.containerControl.isDisposed()) {
+				return existing;
+			}
+		}
+		return new FindReplaceOverlay(shell, workbenchPart, target);
 	}
 
 	private static Composite getTargetControl(Shell targetShell, IWorkbenchPart targetPart) {
@@ -225,6 +274,133 @@ public class FindReplaceOverlay {
 
 	private boolean insertedInTargetParent() {
 		return targetControl instanceof StyledText;
+	}
+
+	private MPartStack getEditorStack() {
+		if (targetPart == null) {
+			return null;
+		}
+		IWorkbenchPartSite site = targetPart.getSite();
+		MPart mPart = site.getService(MPart.class);
+		if (mPart == null) {
+			return null;
+		}
+		MUIElement presentationElement = mPart.getCurSharedRef() != null ? mPart.getCurSharedRef() : mPart;
+		MUIElement parent = presentationElement.getParent();
+		while (parent != null && !(parent instanceof MPartStack)) {
+			parent = parent.getParent();
+		}
+		return (MPartStack) parent;
+	}
+
+	private void saveToStackSettings() {
+		if (isRestoringSettings) {
+			return;
+		}
+		MPartStack stack = getEditorStack();
+		if (stack == null) {
+			return;
+		}
+		OverlaySearchSettings existing = FindReplaceOverlayRegistry.getOrCreateSettings(stack);
+		String replaceString = okayToUse(replaceBar) ? replaceBar.getText() : existing.getReplaceString();
+		OverlaySearchSettings settings = new OverlaySearchSettings(getFindString(), replaceString,
+				findReplaceLogic.isActive(SearchOptions.CASE_SENSITIVE),
+				findReplaceLogic.isActive(SearchOptions.WHOLE_WORD), findReplaceLogic.isActive(SearchOptions.REGEX),
+				!findReplaceLogic.isActive(SearchOptions.GLOBAL), isReplaceVisible(), existing.isOverlayOpen());
+		FindReplaceOverlayRegistry.putSettings(stack, settings);
+	}
+
+	void applyStackSettings(OverlaySearchSettings settings) {
+		isRestoringSettings = true;
+		try {
+			activateInFindReplacerIf(SearchOptions.CASE_SENSITIVE, settings.isCaseSensitive());
+			caseSensitiveSearchButton.setSelection(settings.isCaseSensitive());
+
+			activateInFindReplacerIf(SearchOptions.REGEX, settings.isRegex());
+			regexSearchButton.setSelection(settings.isRegex());
+
+			boolean wholeWordAvailable = findReplaceLogic.isAvailable(SearchOptions.WHOLE_WORD);
+			activateInFindReplacerIf(SearchOptions.WHOLE_WORD, settings.isWholeWord() && wholeWordAvailable);
+			wholeWordSearchButton.setSelection(findReplaceLogic.isAvailableAndActive(SearchOptions.WHOLE_WORD));
+			wholeWordSearchButton.setEnabled(wholeWordAvailable);
+
+			activateInFindReplacerIf(SearchOptions.GLOBAL, !settings.isSearchInSelection());
+			searchInSelectionButton.setSelection(settings.isSearchInSelection());
+
+			searchBar.setText(settings.getFindString());
+
+			setReplaceVisible(settings.isReplaceBarOpen());
+			if (isReplaceVisible() && okayToUse(replaceBar)) {
+				replaceBar.setText(settings.getReplaceString());
+				findReplaceLogic.setReplaceString(settings.getReplaceString());
+			}
+
+			updateContentAssistAvailability();
+			decorate();
+		} finally {
+			isRestoringSettings = false;
+		}
+	}
+
+	private void setOverlayOpenInStack(boolean open) {
+		MPartStack stack = getEditorStack();
+		if (stack == null) {
+			return;
+		}
+		if (open) {
+			FindReplaceOverlayRegistry.putSettings(stack,
+					FindReplaceOverlayRegistry.getOrCreateSettings(stack).withOverlayOpen(true));
+		} else {
+			OverlaySearchSettings settings = FindReplaceOverlayRegistry.getSettings(stack);
+			if (settings != null) {
+				FindReplaceOverlayRegistry.putSettings(stack, settings.withOverlayOpen(false));
+			}
+		}
+	}
+
+	private void registerStackMemberActivationListener() {
+		if (partListenerRegistered || targetPart == null) {
+			return;
+		}
+		IWorkbenchPartSite site = targetPart.getSite();
+		IPartService partService = site.getWorkbenchWindow().getPartService();
+		stackMemberActivationListener = new StackPartActivationListener();
+		partService.addPartListener(stackMemberActivationListener);
+		partListenerRegistered = true;
+		containerControl.addDisposeListener(__ -> {
+			partService.removePartListener(stackMemberActivationListener);
+			stackMemberActivationListener = null;
+			partListenerRegistered = false;
+		});
+	}
+
+	private boolean isInSameStack(IWorkbenchPart part, MPartStack myStack) {
+		if (part == null || myStack == null) {
+			return false;
+		}
+		IWorkbenchPartSite site = part.getSite();
+		MPart mPart = site.getService(MPart.class);
+		if (mPart == null) {
+			return false;
+		}
+		MUIElement presentationElement = mPart.getCurSharedRef() != null ? mPart.getCurSharedRef() : mPart;
+		MUIElement parent = presentationElement.getParent();
+		while (parent != null && !(parent instanceof MPartStack)) {
+			parent = parent.getParent();
+		}
+		return myStack.equals(parent);
+	}
+
+	private void triggerOverlayForPart(IWorkbenchPart part) {
+		IFindReplaceTarget target = part.getAdapter(IFindReplaceTarget.class);
+		if (target == null || !(part instanceof StatusTextEditor)) {
+			return;
+		}
+		Shell shell = part.getSite().getShell();
+		FindReplaceOverlay otherOverlay = getOrCreateForPart(shell, part, target);
+		if (!otherOverlay.containerControl.isDisposed()) {
+			otherOverlay.open(true);
+		}
 	}
 
 	private IFindReplaceLogic createFindReplaceLogic(IFindReplaceTarget target) {
@@ -246,7 +422,8 @@ public class FindReplaceOverlay {
 	}
 
 	private void performReplaceAll() {
-		BusyIndicator.showWhile(containerControl.getShell() != null ? containerControl.getShell().getDisplay() : Display.getCurrent(),
+		BusyIndicator.showWhile(
+				containerControl.getShell() != null ? containerControl.getShell().getDisplay() : Display.getCurrent(),
 				findReplaceLogic::performReplaceAll);
 		evaluateStatusAfterReplace();
 		replaceBar.storeHistory();
@@ -254,7 +431,8 @@ public class FindReplaceOverlay {
 	}
 
 	private void performSelectAll() {
-		BusyIndicator.showWhile(containerControl.getShell() != null ? containerControl.getShell().getDisplay() : Display.getCurrent(),
+		BusyIndicator.showWhile(
+				containerControl.getShell() != null ? containerControl.getShell().getDisplay() : Display.getCurrent(),
 				findReplaceLogic::performSelectAll);
 		searchBar.storeHistory();
 	}
@@ -272,9 +450,9 @@ public class FindReplaceOverlay {
 		}
 	}
 
-	private final FocusListener targetFocusListener = FocusListener.focusGainedAdapter(__ ->  {
-			removeSearchScope();
-			searchBar.storeHistory();
+	private final FocusListener targetFocusListener = FocusListener.focusGainedAdapter(__ -> {
+		removeSearchScope();
+		searchBar.storeHistory();
 	});
 
 	private final KeyListener closeOnTargetEscapeListener = KeyListener.keyPressedAdapter(c -> {
@@ -300,10 +478,24 @@ public class FindReplaceOverlay {
 	}
 
 	public void close() {
-		if (containerControl.isDisposed() || !containerControl.isVisible()) {
+		close(false);
+	}
+
+	/**
+	 * Closes the overlay.
+	 *
+	 * @param silently if {@code true}, the target part does not receive focus,
+	 *                 which avoids stealing focus from another part when the
+	 *                 overlay is closed as a side effect of a stack-mate closing
+	 *                 rather than by explicit user interaction.
+	 */
+	private void close(boolean silently) {
+		boolean isVisible = silently ? containerControl.getVisible() : containerControl.isVisible();
+		if (containerControl.isDisposed() || !isVisible) {
 			return;
 		}
-		if (targetPart != null) {
+		setOverlayOpenInStack(false);
+		if (!silently && targetPart != null) {
 			targetPart.setFocus();
 		}
 		storeOverlaySettings();
@@ -314,10 +506,24 @@ public class FindReplaceOverlay {
 	}
 
 	public void open() {
+		open(false);
+	}
+
+	/**
+	 * Opens the overlay.
+	 *
+	 * @param forStack if {@code true}, the overlay is being opened as a side
+	 *                 effect of a stack-mate becoming active rather than by
+	 *                 explicit user interaction, so the current target selection
+	 *                 must not be used to prefill the search term.
+	 */
+	private void open(boolean forStack) {
 		if (!containerControl.isVisible()) {
 			containerControl.setVisible(true);
 			bindListeners();
 			restoreOverlaySettings();
+			setOverlayOpenInStack(true);
+			registerStackMemberActivationListener();
 		}
 		containerControl.layout();
 		containerControl.moveAbove(null);
@@ -325,16 +531,24 @@ public class FindReplaceOverlay {
 		updateContentAssistAvailability();
 
 		searchBar.setFocus();
-		updateFromTargetSelection();
+		if (!forStack) {
+			updateFromTargetSelection();
+		}
 	}
 
 	private void storeOverlaySettings() {
 		getDialogSettings().put(REPLACE_BAR_OPEN_DIALOG_SETTING, isReplaceVisible());
+		saveToStackSettings();
 	}
 
-	private void restoreOverlaySettings() {
-		Boolean shouldOpenReplaceBar = getDialogSettings().getBoolean(REPLACE_BAR_OPEN_DIALOG_SETTING);
-		setReplaceVisible(shouldOpenReplaceBar);
+	void restoreOverlaySettings() {
+		OverlaySearchSettings stackSettings = FindReplaceOverlayRegistry.getSettings(getEditorStack());
+		if (stackSettings != null) {
+			applyStackSettings(stackSettings);
+		} else {
+			boolean shouldOpenReplaceBar = getDialogSettings().getBoolean(REPLACE_BAR_OPEN_DIALOG_SETTING);
+			setReplaceVisible(shouldOpenReplaceBar);
+		}
 	}
 
 	private void unbindListeners() {
@@ -518,7 +732,7 @@ public class FindReplaceOverlay {
 				FindReplaceOverlayCommandSupport.CMD_TOGGLE_SEARCH_IN_SELECTION);
 		searchInSelectionAction.addExecutionListener(this::updateIncrementalSearch);
 		commandSupport.registerAction(searchInSelectionAction);
-		ToolItem searchInSelectionButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
+		searchInSelectionButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
 				.withImage(FindReplaceOverlayImages.get(FindReplaceOverlayImages.KEY_SEARCH_IN_AREA))
 				.withToolTipText(FindReplaceMessages.FindReplaceOverlay_searchInSelectionButton_toolTip)
 				.withAction(searchInSelectionAction).displayInverted().build();
@@ -530,7 +744,7 @@ public class FindReplaceOverlay {
 				findReplaceLogic, FindReplaceOverlayCommandSupport.CMD_TOGGLE_REGEX);
 		regexAction.addExecutionListener(this::updateIncrementalSearch);
 		commandSupport.registerAction(regexAction);
-		ToolItem regexSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
+		regexSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
 				.withImage(FindReplaceOverlayImages.get(FindReplaceOverlayImages.KEY_FIND_REGEX))
 				.withToolTipText(FindReplaceMessages.FindReplaceOverlay_regexSearchButton_toolTip)
 				.withAction(regexAction).build();
@@ -538,6 +752,7 @@ public class FindReplaceOverlay {
 		findReplaceLogic.addSearchOptionActivationChangedListener(SearchOptions.REGEX, activated -> {
 			updateContentAssistAvailability();
 			decorate();
+			saveToStackSettings();
 		});
 	}
 
@@ -546,8 +761,9 @@ public class FindReplaceOverlay {
 				SearchOptions.CASE_SENSITIVE, findReplaceLogic,
 				FindReplaceOverlayCommandSupport.CMD_TOGGLE_CASE_SENSITIVE);
 		caseSensitiveAction.addExecutionListener(this::updateIncrementalSearch);
+		caseSensitiveAction.addExecutionListener(this::saveToStackSettings);
 		commandSupport.registerAction(caseSensitiveAction);
-		ToolItem caseSensitiveSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
+		caseSensitiveSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
 				.withImage(FindReplaceOverlayImages.get(FindReplaceOverlayImages.KEY_CASE_SENSITIVE))
 				.withToolTipText(FindReplaceMessages.FindReplaceOverlay_caseSensitiveButton_toolTip)
 				.withAction(caseSensitiveAction).build();
@@ -558,8 +774,9 @@ public class FindReplaceOverlay {
 		FindReplaceOverlaySearchOptionAction wholeWordAction = new FindReplaceOverlaySearchOptionAction(
 				SearchOptions.WHOLE_WORD, findReplaceLogic, FindReplaceOverlayCommandSupport.CMD_TOGGLE_WHOLE_WORD);
 		wholeWordAction.addExecutionListener(this::updateIncrementalSearch);
+		wholeWordAction.addExecutionListener(this::saveToStackSettings);
 		commandSupport.registerAction(wholeWordAction);
-		ToolItem wholeWordSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
+		wholeWordSearchButton = new AccessibleToolItemBuilder(searchTools).withStyleBits(SWT.CHECK)
 				.withImage(FindReplaceOverlayImages.get(FindReplaceOverlayImages.KEY_WHOLE_WORD))
 				.withToolTipText(FindReplaceMessages.FindReplaceOverlay_wholeWordsButton_toolTip)
 				.withAction(wholeWordAction).build();
@@ -625,12 +842,14 @@ public class FindReplaceOverlay {
 		searchBar.addModifyListener(e -> {
 			updateIncrementalSearch();
 			decorate();
+			saveToStackSettings();
 		});
 		searchBar.addFocusListener(new FocusListener() {
 			@Override
 			public void focusGained(FocusEvent e) {
 				findReplaceLogic.resetIncrementalBaseLocation();
 			}
+
 			@Override
 			public void focusLost(FocusEvent e) {
 				resetErrorColoring();
@@ -659,6 +878,7 @@ public class FindReplaceOverlay {
 		replaceBar.addModifyListener(e -> {
 			findReplaceLogic.setReplaceString(replaceBar.getText());
 			resetErrorColoring();
+			saveToStackSettings();
 		});
 		replaceBar.addFocusListener(targetActionActivationHandling);
 		replaceBar.addFocusListener(FocusListener.focusLostAdapter(e -> resetErrorColoring()));
@@ -703,6 +923,7 @@ public class FindReplaceOverlay {
 		updateContentAssistAvailability();
 		Control newFocusControl = shouldBeVisible ? replaceBar : searchBar;
 		newFocusControl.forceFocus();
+		saveToStackSettings();
 	}
 
 	private void updateReplaceVisibility(boolean visible) {
@@ -975,6 +1196,42 @@ public class FindReplaceOverlay {
 			SearchDecoration.validateRegex(getFindString(), searchBarDecoration);
 		} else {
 			searchBarDecoration.hide();
+		}
+	}
+
+	private class StackPartActivationListener implements IPartListener2 {
+		@Override
+		public void partActivated(IWorkbenchPartReference partRef) {
+			IWorkbenchPart activatedPart = partRef.getPart(false);
+			if (containerControl.isDisposed()) {
+				return;
+			}
+			MPartStack myStack = getEditorStack();
+			if (myStack == null) {
+				return;
+			}
+			OverlaySearchSettings settings = FindReplaceOverlayRegistry.getSettings(myStack);
+
+			if (activatedPart == targetPart) {
+				containerControl.getDisplay().asyncExec(() -> {
+					if (containerControl.isDisposed()) {
+						return;
+					}
+					OverlaySearchSettings currentSettings = FindReplaceOverlayRegistry.getSettings(getEditorStack());
+					if (currentSettings != null && currentSettings.isOverlayOpen() && containerControl.isVisible()) {
+						applyStackSettings(currentSettings);
+					} else if ((currentSettings == null || !currentSettings.isOverlayOpen())
+							&& containerControl.getVisible()) {
+						close(true);
+					}
+				});
+			} else if (settings != null && settings.isOverlayOpen() && isInSameStack(activatedPart, myStack)) {
+				containerControl.getDisplay().asyncExec(() -> {
+					if (!containerControl.isDisposed()) {
+						triggerOverlayForPart(activatedPart);
+					}
+				});
+			}
 		}
 	}
 

@@ -417,7 +417,8 @@ public class FindReplaceAction extends ResourceAction implements IUpdate {
 	}
 
 	private void showOverlayInEditor() {
-		if (overlay == null) {
+		boolean isNewOverlay = (overlay == null);
+		if (isNewOverlay) {
 			Shell shellToUse = null;
 
 			if (fShell == null) {
@@ -425,14 +426,19 @@ public class FindReplaceAction extends ResourceAction implements IUpdate {
 			} else {
 				shellToUse = fShell;
 			}
-			overlay = new FindReplaceOverlay(shellToUse, fWorkbenchPart, fTarget);
+			overlay = FindReplaceOverlay.getOrCreateForPart(shellToUse, fWorkbenchPart, fTarget);
 		}
 
 		overlay.open();
 		overlay.setPositionToTop(shouldPositionOverlayOnTop());
 
-		hookDialogPreferenceListener();
-		overlay.getContainerControl().addDisposeListener(__ -> removeDialogPreferenceListener());
+		if (isNewOverlay) {
+			hookDialogPreferenceListener();
+			overlay.getContainerControl().addDisposeListener(__ -> {
+				removeDialogPreferenceListener();
+				overlay = null;
+			});
+		}
 	}
 
 	@Override

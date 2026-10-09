@@ -34,7 +34,6 @@ import org.eclipse.jface.text.source.inlined.Positions;
  * @since 3.13
  */
 public abstract class LineHeaderCodeMining extends AbstractCodeMining {
-
 	/**
 	 * CodeMining constructor to locate the code mining before the given line number.
 	 *
@@ -80,7 +79,7 @@ public abstract class LineHeaderCodeMining extends AbstractCodeMining {
 
 	@Override
 	public Point draw(GC gc, StyledText textWidget, Color color, int x, int y) {
-		return draw(getLabel(), gc, textWidget, x, y, () -> LineHeaderCodeMining.super.draw(gc, textWidget, color, x, y));
+		return draw(getLabelOrPlaceholder(), gc, textWidget, x, y, () -> LineHeaderCodeMining.super.draw(gc, textWidget, color, x, y));
 	}
 
 	static Point draw(String label, GC gc, StyledText textWidget, int x, int y, Callable<Point> superDrawCallable) {

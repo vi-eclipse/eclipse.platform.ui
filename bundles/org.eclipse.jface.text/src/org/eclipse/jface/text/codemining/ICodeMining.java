@@ -62,16 +62,50 @@ public interface ICodeMining {
 	 * </p>
 	 * <ul>
 	 * <li><code>null</code> when mining is not resolved</li>
-	 * <li><code>null</code> when mining is resolved means that mining was resolved with an error and it will not
-	 * be displayed.</li>
+	 * <li><code>null</code> when mining is resolved means that mining was resolved with an error
+	 * and it will not be displayed.</li>
 	 * <li>empty when mining is resolved means that mining will not be displayed</li>
 	 * <li>non empty when mining must be displayed</li>
 	 * </ul>
 	 *
+	 * @deprecated Since 3.32. Use {@link #getLabelState()} instead.
 	 * @return the label may be set early in the class lifecycle, or upon completion of the future
 	 *         provided by {@link #resolve(ITextViewer, IProgressMonitor)} operation.
 	 */
-	String getLabel();
+	@Deprecated
+	default String getLabel() {
+		return null;
+	}
+
+	/**
+	 * Returns the label. May be set early in the class lifecycle, or upon completion of the future
+	 * provided by {@link #resolve(ITextViewer, IProgressMonitor)} operation.
+	 *
+	 * <p>
+	 * The returned label can be one of:
+	 * </p>
+	 * <ul>
+	 * <li>A {@linkplain ResolvedLabel} when mining is resolved whose
+	 * {@linkplain ResolvedLabel#text() text()} can be one of</li>
+	 * <ul>
+	 * <li><code>null</code> when mining was resolved with an error and it will not be
+	 * displayed.</li>
+	 * <li>empty when mining will not be displayed</li>
+	 * <li>non empty when mining must be displayed</li>
+	 * </ul>
+	 * <li>An {@linkplain UnresolvedLabel} whose {@linkplain UnresolvedLabel#placeholderText()
+	 * placeholderText()} will be displayed while the label is not resolved, unless the placeholder
+	 * text is itself {@code null} or empty</li>
+	 * </ul>
+	 *
+	 * @return The label. May be set early in the class lifecycle, or upon completion of the future
+	 *         provided by {@link #resolve(ITextViewer, IProgressMonitor)} operation. Must not
+	 *         itself be {@code null}
+	 * @since 3.32
+	 */
+	default ICodeMiningLabel getLabelState() {
+		return new ResolvedLabel(getLabel());
+	}
 
 	/**
 	 * Returns the future to resolve the content of mining, or

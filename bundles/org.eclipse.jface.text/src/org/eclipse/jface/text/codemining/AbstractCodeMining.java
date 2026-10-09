@@ -13,6 +13,7 @@
  */
 package org.eclipse.jface.text.codemining;
 
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -50,9 +51,9 @@ public abstract class AbstractCodeMining implements ICodeMining {
 	private CompletableFuture<Void> resolveFuture;
 
 	/**
-	 * The label of the resolved codemining.
+	 * The label (resolved or placeholder) of the codemining.
 	 */
-	private String label;
+	private ICodeMiningLabel label= null;
 
 	/**
 	 * The action to execute when mining is clicked and null otherwise.
@@ -82,9 +83,33 @@ public abstract class AbstractCodeMining implements ICodeMining {
 		return provider;
 	}
 
+	@Deprecated
 	@Override
 	public String getLabel() {
+		if (label instanceof ResolvedLabel(var labelText)) {
+			return labelText;
+		}
+
+		return null;
+	}
+
+	@Override
+	public final ICodeMiningLabel getLabelState() {
+		if (label == null) {
+			return new ResolvedLabel(getLabel()); // getLabel() could be overridden
+		}
+
 		return label;
+	}
+
+	/**
+	 * @since 3.32
+	 */
+	public final String getLabelOrPlaceholder() {
+		return switch (getLabelState()) {
+			case ResolvedLabel(var labelText) -> labelText;
+			case UnresolvedLabel(var placeholder) -> placeholder;
+		};
 	}
 
 	/**
@@ -93,7 +118,21 @@ public abstract class AbstractCodeMining implements ICodeMining {
 	 * @param label the label mining.
 	 */
 	public void setLabel(String label) {
-		this.label= label;
+		setLabelState(new ResolvedLabel(label));
+	}
+
+	/**
+	 * @since 3.32
+	 */
+	public final void setPlaceholderLabel(String placeholderLabel) {
+		setLabelState(new UnresolvedLabel(placeholderLabel));
+	}
+
+	/**
+	 * @since 3.32
+	 */
+	public final void setLabelState(ICodeMiningLabel label) {
+		this.label= Objects.requireNonNull(label);
 	}
 
 	@Override
@@ -142,7 +181,12 @@ public abstract class AbstractCodeMining implements ICodeMining {
 	 */
 	@Override
 	public Point draw(GC gc, StyledText textWidget, Color color, int x, int y) {
-		String title= getLabel() != null ? getLabel() : "no command"; //$NON-NLS-1$
+		String title= getLabelOrPlaceholder();
+
+		if (title == null) {
+			title= "no command"; //$NON-NLS-1$
+		}
+
 		gc.drawString(title, x, y, true);
 		Point result= gc.stringExtent(title);
 		result.y= textWidget.getLineHeight() + textWidget.getLineSpacing();

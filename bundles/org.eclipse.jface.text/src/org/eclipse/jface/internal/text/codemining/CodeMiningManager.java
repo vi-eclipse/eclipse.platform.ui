@@ -49,6 +49,8 @@ import org.eclipse.jface.text.codemining.ICodeMining;
 import org.eclipse.jface.text.codemining.ICodeMiningProvider;
 import org.eclipse.jface.text.codemining.LineContentCodeMining;
 import org.eclipse.jface.text.codemining.LineHeaderCodeMining;
+import org.eclipse.jface.text.codemining.ResolvedLabel;
+import org.eclipse.jface.text.codemining.UnresolvedLabel;
 import org.eclipse.jface.text.source.Annotation;
 import org.eclipse.jface.text.source.ISourceViewer;
 import org.eclipse.jface.text.source.inlined.AbstractInlinedAnnotation;
@@ -341,6 +343,34 @@ public class CodeMiningManager implements Runnable {
 	}
 
 	/**
+	 * Returns the label or placeholder text of the given mining.
+	 * <p>
+	 * Also returns {@code null} if the {@link ICodeMining#getLabelState() label} is an
+	 * {@link UnresolvedLabel} but the mining itself is marked as
+	 * {@linkplain ICodeMining#isResolved() resolved}.
+	 *
+	 * @param mining The mining
+	 * @return The label or placeholder text. May be {@code null} or empty.
+	 */
+	static String getLabelOrPlaceholderText(ICodeMining mining) {
+		return switch (mining.getLabelState()) {
+			case ResolvedLabel(var labelText) -> labelText;
+			case UnresolvedLabel unused when mining.isResolved() -> null;
+			case UnresolvedLabel(var placeholderText) -> placeholderText;
+		};
+	}
+
+	static boolean hasNotEmptyLabelOrPlaceholder(ICodeMining mining) {
+		if (mining != null) {
+			String text= getLabelOrPlaceholderText(mining);
+
+			return text != null && !text.isEmpty();
+		}
+
+		return false;
+	}
+
+	/**
 	 * Returns <code>true</code> if the given mining has a non empty label and <code>false</code>
 	 * otherwise.
 	 *
@@ -349,7 +379,27 @@ public class CodeMiningManager implements Runnable {
 	 *         otherwise.
 	 */
 	static boolean isValidMining(ICodeMining mining) {
-		return mining != null && mining.getLabel() != null && !mining.getLabel().isEmpty();
+		if (mining != null && mining.getLabelState() instanceof ResolvedLabel(var labelText)) {
+			return labelText != null && !labelText.isEmpty();
+		}
+
+		return false;
+	}
+
+	/**
+	 * Returns <code>true</code> if the given mining a non empty placeholder label and
+	 * <code>false</code> otherwise.
+	 *
+	 * @param mining the mining to check
+	 * @return <code>true</code> if the given mining has a non empty placeholder label and
+	 *         <code>false</code> otherwise.
+	 */
+	static boolean isValidPlaceholderMining(ICodeMining mining) {
+		if (mining != null && mining.getLabelState() instanceof UnresolvedLabel(var placeholderText)) {
+			return placeholderText != null && !placeholderText.isEmpty();
+		}
+
+		return false;
 	}
 
 	/**

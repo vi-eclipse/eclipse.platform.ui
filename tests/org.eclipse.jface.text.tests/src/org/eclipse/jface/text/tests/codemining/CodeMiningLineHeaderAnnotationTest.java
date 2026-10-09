@@ -10,6 +10,7 @@
  *******************************************************************************/
 package org.eclipse.jface.text.tests.codemining;
 
+import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
@@ -21,6 +22,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyledText;
@@ -38,7 +41,10 @@ import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.Position;
 import org.eclipse.jface.text.codemining.ICodeMining;
+import org.eclipse.jface.text.codemining.ICodeMiningLabel;
 import org.eclipse.jface.text.codemining.LineHeaderCodeMining;
+import org.eclipse.jface.text.codemining.ResolvedLabel;
+import org.eclipse.jface.text.codemining.UnresolvedLabel;
 import org.eclipse.jface.text.source.AnnotationModel;
 import org.eclipse.jface.text.source.AnnotationPainter;
 import org.eclipse.jface.text.source.SourceViewer;
@@ -83,37 +89,42 @@ public class CodeMiningLineHeaderAnnotationTest {
 
 	@Test
 	public void testDrawTakesLineSpacingForSingleLineIntoAccount() throws Exception {
-		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", "code mining single line");
+		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", new ResolvedLabel("code mining single line"));
+		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", new UnresolvedLabel("code mining single line"));
 	}
 
 	@Test
 	public void testDrawTakesLineSpacingForMultiLineIntoAccount() throws Exception {
-		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", "code mining line1\ncode mining line2");
+		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", new ResolvedLabel("code mining line1\ncode mining line2"));
+		assertDrawTakesLineSpacingIntoAccount("line1\nline2\nline3", new UnresolvedLabel("code mining line1\ncode mining line2"));
 	}
 
-	private void assertDrawTakesLineSpacingIntoAccount(String source, String codeMiningLabel) throws Exception {
+	private void assertDrawTakesLineSpacingIntoAccount(String source, ICodeMiningLabel codeMiningLabel) throws Exception {
 		var doc= fViewer.getDocument();
 		doc.set(source);
 		var textWidget= fViewer.getTextWidget();
 		textWidget.setLineSpacing(10);
 		var mining= new LineHeaderCodeMining(0, doc, null, null) {
-			@Override
-			public String getLabel() {
-				return codeMiningLabel;
+			{
+				setLabelState(codeMiningLabel);
 			}
 		};
 		var gc= new GC(textWidget);
 		try {
 			Point result= mining.draw(gc, textWidget, null, 0, 0);
-			String[] codeMiningLabelsByLine= codeMiningLabel.split("\n");
+			String[] codeMiningLabelsByLine= (switch (codeMiningLabel) {
+				case ResolvedLabel(var labelText) -> labelText;
+				case UnresolvedLabel(var placeholder) -> placeholder;
+			}).split("\n");
 			assertEquals(codeMiningLabelsByLine.length * (gc.stringExtent(codeMiningLabelsByLine[0]).y + textWidget.getLineSpacing()), result.y);
 		} finally {
 			gc.dispose();
 		}
 	}
 
-	@Test
-	public void testGetHeightDoesNotReturnZero() throws Exception {
+	@ParameterizedTest
+	@ValueSource(booleans= { false, true })
+	public void testGetHeightDoesNotReturnZero(boolean placeholderMining) throws Exception {
 		var cut= new CodeMiningLineHeaderAnnotation(new Position(0, 0), fViewer);
 		var s= new InlinedAnnotationSupport();
 		s.install(fViewer, new AnnotationPainter(fViewer, null));
@@ -121,9 +132,14 @@ public class CodeMiningLineHeaderAnnotationTest {
 		m.setAccessible(true);
 		m.invoke(cut, s);
 		cut.update(Arrays.asList(new LineHeaderCodeMining(0, document, null) {
-			@Override
-			public String getLabel() {
-				return "mining";
+			{
+				String text= "mining";
+
+				if (placeholderMining) {
+					setPlaceholderLabel(text);
+				} else {
+					setLabel(text);
+				}
 			}
 		}), null);
 		// https: //github.com/eclipse-platform/eclipse.platform.ui/issues/2786
@@ -139,8 +155,9 @@ public class CodeMiningLineHeaderAnnotationTest {
 	 * {@link StyledText#getLineHeight()}, so the lines below a multiline code mining were shifted
 	 * by a few pixels relative to the regular grid.
 	 */
-	@Test
-	public void testTwoLineCodeMiningHeightMatchesTextWidgetLineHeight() throws Exception {
+	@ParameterizedTest
+	@ValueSource(booleans= { false, true })
+	public void testTwoLineCodeMiningHeightMatchesTextWidgetLineHeight(boolean placeholderMining) throws Exception {
 		var doc= fViewer.getDocument();
 		doc.set("line0\nline1\nline2");
 		var textWidget= fViewer.getTextWidget();
@@ -156,9 +173,12 @@ public class CodeMiningLineHeaderAnnotationTest {
 			}
 			String codeMiningLabel= "code mining line1\ncode mining line2";
 			var mining= new LineHeaderCodeMining(0, doc, null, null) {
-				@Override
-				public String getLabel() {
-					return codeMiningLabel;
+				{
+					if (placeholderMining) {
+						setPlaceholderLabel(codeMiningLabel);
+					} else {
+						setLabel(codeMiningLabel);
+					}
 				}
 			};
 			int normalLineHeight= textWidget.getLineHeight();
@@ -221,20 +241,23 @@ public class CodeMiningLineHeaderAnnotationTest {
 
 		List<ICodeMining> minings= annotation.getMinings();
 		Iterator<ICodeMining> iterator= minings.iterator();
-		assertEquals("first", iterator.next().getLabel());
+		ICodeMiningLabel label= iterator.next().getLabelState();
+		assertTrue(label instanceof ResolvedLabel);
+		assertEquals("first", ((ResolvedLabel) label).text());
 
 		annotation.update(List.of(codeMining("third")), null);
 
-		assertEquals("second", iterator.next().getLabel());
+		label= iterator.next().getLabelState();
+		assertTrue(label instanceof ResolvedLabel);
+		assertEquals("second", ((ResolvedLabel) label).text());
 		assertEquals(2, minings.size());
 		assertEquals(1, annotation.getMinings().size());
 	}
 
 	private LineHeaderCodeMining codeMining(String label) throws BadLocationException {
 		return new LineHeaderCodeMining(0, document, null) {
-			@Override
-			public String getLabel() {
-				return label;
+			{
+				setLabel(label);
 			}
 		};
 	}

@@ -12,12 +12,12 @@ package org.eclipse.jface.internal.text.codemining;
 
 import static org.eclipse.jface.internal.text.codemining.CodeMiningLineHeaderAnnotation.disposeMinings;
 import static org.eclipse.jface.internal.text.codemining.CodeMiningLineHeaderAnnotation.getMultilineHeight;
-import static org.eclipse.jface.internal.text.codemining.CodeMiningLineHeaderAnnotation.hasAtLeastOneResolvedMiningNotEmpty;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.MouseEvent;
@@ -155,5 +155,23 @@ public class CodeMiningDocumentFooterAnnotation extends LineFooterAnnotation imp
 	@Override
 	public List<ICodeMining> getMinings() {
 		return fMinings;
+	}
+
+	/**
+	 * Returns <code>true</code> if the annotation has at least one resolved mining which have a
+	 * label and <code>false</code> otherwise.
+	 *
+	 * @return <code>true</code> if the annotation has at least one resolved mining which have a
+	 *         label and <code>false</code> otherwise.
+	 */
+	static boolean hasAtLeastOneResolvedMiningNotEmpty(List<ICodeMining> minings, ICodeMining[] resolvedMinings) {
+		if (minings.stream().anyMatch(CodeMiningManager::isValidMining)) {
+			return true; // will have a resolved mining.
+		}
+
+		if (resolvedMinings == null || resolvedMinings.length == 0) {
+			return false;
+		}
+		return Stream.of(resolvedMinings).anyMatch(CodeMiningManager::isValidMining);
 	}
 }

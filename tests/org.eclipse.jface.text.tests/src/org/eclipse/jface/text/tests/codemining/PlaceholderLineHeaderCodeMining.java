@@ -21,7 +21,7 @@ import org.eclipse.jface.text.codemining.ICodeMiningProvider;
 import org.eclipse.jface.text.codemining.IPlaceholderCodeMining;
 import org.eclipse.jface.text.codemining.LineHeaderCodeMining;
 
-public class PlaceholderLineHeaderCodeMining extends LineHeaderCodeMining implements IPlaceholderCodeMining {
+public abstract class PlaceholderLineHeaderCodeMining extends LineHeaderCodeMining implements IPlaceholderCodeMining {
 
 	public PlaceholderLineHeaderCodeMining(int beforeLineNumber, IDocument document, ICodeMiningProvider provider, Consumer<MouseEvent> action) throws BadLocationException {
 		super(beforeLineNumber, document, provider, action);

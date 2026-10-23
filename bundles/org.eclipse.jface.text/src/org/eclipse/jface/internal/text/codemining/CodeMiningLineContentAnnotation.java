@@ -114,7 +114,7 @@ public class CodeMiningLineContentAnnotation extends LineContentAnnotation imple
 		int length= Math.min(oldMinings.size(), minings.size());
 		for (int i= 0; i < length; i++) {
 			ICodeMining mining= oldMinings.get(i);
-			if (mining.getLabel() != null && CodeMiningManager.isNotUnresolvedPlaceholder(mining)) {
+			if (mining.getLabel() != null) {
 				// mining was resolved without an error.
 				resolvedMinings[i]= mining;
 			}
@@ -149,15 +149,10 @@ public class CodeMiningLineContentAnnotation extends LineContentAnnotation imple
 			ICodeMining mining= minings.get(i);
 			// try to get the last resolved mining.
 			ICodeMining lastResolvedMining= (resolvedMinings != null && resolvedMinings.length > i) ? resolvedMinings[i] : null;
-			String label= mining.getLabel();
+			String label= CodeMiningManager.getLabelOrPlaceholder(mining);
 
 			if (label != null) {
-				if (CodeMiningManager.isNotUnresolvedPlaceholder(mining)) {
-					// mining is resolved without error, update the resolved mining list
-					if (resolvedMinings != null && resolvedMinings.length > i) {
-						resolvedMinings[i]= mining;
-					}
-				} else {
+				if (CodeMiningManager.isUnresolvedPlaceholder(mining)) {
 					if (label.isEmpty()) {
 						mining= lastResolvedMining;
 					}
@@ -166,6 +161,11 @@ public class CodeMiningLineContentAnnotation extends LineContentAnnotation imple
 						// redraw the annotation when mining is resolved.
 						redraw();
 						redrawn= true;
+					}
+				} else {
+					// mining is resolved without error, update the resolved mining list
+					if (resolvedMinings != null && resolvedMinings.length > i) {
+						resolvedMinings[i]= mining;
 					}
 				}
 			} else if (!mining.isResolved()) {
@@ -180,7 +180,7 @@ public class CodeMiningLineContentAnnotation extends LineContentAnnotation imple
 				// the mining is resolved with error, draw the last resolved mining
 				mining= lastResolvedMining;
 			}
-			if (!CodeMiningManager.isValidMining(mining)) {
+			if (!CodeMiningManager.isDrawableMining(mining)) {
 				// ignore the draw of mining
 				continue;
 			}

@@ -10,15 +10,32 @@
  *******************************************************************************/
 package org.eclipse.jface.text.codemining;
 
+import java.util.concurrent.CompletableFuture;
+
+import org.eclipse.core.runtime.IProgressMonitor;
+
+import org.eclipse.jface.text.ITextViewer;
+
 /**
- * A placeholder code mining is a code mining, whose label is interpreted as a placeholder while the
- * mining is not yet resolved. The placeholder {@link #getLabel()} is displayed until
- * {@link #isResolved()} is {@code true}, unless the placeholder label is itself {@code null} or
- * empty.
+ * A placeholder code mining is a code mining which displays a {@linkplain #getPlaceholderLabel()
+ * placeholder label} while its actual {@linkplain #getLabel() label} is being computed.
  * <p>
  * A placeholder code mining can be used to prevent editor jumping for code minings with expensive
- * {@link #resolve(org.eclipse.jface.text.ITextViewer, org.eclipse.core.runtime.IProgressMonitor)}
- * implementations, especially for {@linkplain LineHeaderCodeMining}s.
+ * {@link #resolve(ITextViewer, IProgressMonitor)} implementations, especially for
+ * {@linkplain LineHeaderCodeMining}s.
+ * <p>
+ * Implementations must adhere to the following contract for {@link #getLabel()}:
+ * <ul>
+ * <li>{@link #getLabel()} must return {@code null} until the label is computed. The placeholder is
+ * only used while {@link #getLabel()} returns {@code null} and the mining is not
+ * {@linkplain #isResolved() resolved}. If a non-{@code null} label is set before resolving, the
+ * placeholder is never displayed.</li>
+ * <li>The label must be set during resolution, i.e. before the future returned by
+ * {@link #resolve(ITextViewer, IProgressMonitor)} completes. A label which is set before the future
+ * completes is displayed immediately.</li>
+ * <li>If resolution fails or is cancelled, the label should remain {@code null}. The mining is then
+ * treated as resolved with an error, see {@link ICodeMining#getLabel()}.</li>
+ * </ul>
  *
  * @see ICodeMining
  * @since 3.32
@@ -26,17 +43,29 @@ package org.eclipse.jface.text.codemining;
 public interface IPlaceholderCodeMining extends ICodeMining {
 
 	/**
-	 * {@inheritDoc}
-	 *
-	 * If not yet {@linkplain #isResolved() resolved}, the returned value is treated as a
-	 * placeholder value. The placeholder is only displayed if non-empty.
+	 * Returns the placeholder label, which is displayed while {@link #getLabel()} returns
+	 * {@code null} and the mining is not yet {@linkplain #isResolved() resolved}.
 	 * <p>
-	 * Once the mining is resolved, the value should be updated to the resolved value as described
-	 * above.
+	 * If the placeholder label is {@code null} or empty, the last resolved label of the mining is
+	 * displayed instead, if any.
 	 *
-	 * @return The label. Treated as a placeholder if the mining is not yet resolved.
+	 * @return the placeholder label, may be {@code null} or empty.
+	 */
+	String getPlaceholderLabel();
+
+	/**
+	 * Returns the future to resolve the content of the mining.
+	 * <p>
+	 * The {@linkplain #getLabel() label} must be computed and set during resolution, i.e. before
+	 * the returned future completes.
+	 * <p>
+	 * If the resolution fails or is cancelled, the label should remain {@code null}.
+	 *
+	 * @param viewer {@inheritDoc}
+	 * @param monitor {@inheritDoc}
+	 * @return the future to resolve the content of the mining.
 	 */
 	@Override
-	String getLabel();
+	CompletableFuture<Void> resolve(ITextViewer viewer, IProgressMonitor monitor);
 
 }

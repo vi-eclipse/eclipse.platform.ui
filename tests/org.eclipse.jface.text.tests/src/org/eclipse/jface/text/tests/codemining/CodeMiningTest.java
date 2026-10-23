@@ -623,8 +623,10 @@ public class CodeMiningTest {
 					public CompletableFuture<List<? extends ICodeMining>> provideCodeMinings(ITextViewer viewer, IProgressMonitor monitor) {
 						try {
 							ICodeMining mining= new PlaceholderLineHeaderCodeMining(0, viewer.getDocument(), this) {
-								{
-									setLabel(placeholderText);
+
+								@Override
+								public String getPlaceholderLabel() {
+									return placeholderText;
 								}
 
 								@Override
@@ -634,7 +636,7 @@ public class CodeMiningTest {
 
 								@Override
 								public Point draw(GC gc, StyledText textWidget, Color color, int x, int y) {
-									drawnLabels.add(getLabel());
+									drawnLabels.add(getLabelOrPlaceholder());
 									return super.draw(gc, textWidget, color, x, y);
 								}
 							};

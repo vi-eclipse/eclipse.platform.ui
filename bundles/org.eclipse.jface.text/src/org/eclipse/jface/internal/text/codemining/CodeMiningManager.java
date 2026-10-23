@@ -353,17 +353,51 @@ public class CodeMiningManager implements Runnable {
 		return mining != null && mining.getLabel() != null && !mining.getLabel().isEmpty();
 	}
 
+	/**
+	 * Returns {@code true} if the given mining has a non-empty label or is not resolved and has a
+	 * non-empty placeholder label. Returns {@code false} otherwise.
+	 *
+	 * @param mining the mining to check.
+	 * @return {@code true} if the given mining has a non-empty label or is not resolved and has a
+	 *         non-empty placeholder label. {@code false} otherwise
+	 */
+	static boolean isDrawableMining(ICodeMining mining) {
+		if (mining == null) {
+			return false;
+		}
+
+		String label= getLabelOrPlaceholder(mining);
+		return label != null && !label.isEmpty();
+	}
 
 	/**
-	 * Returns {@code true} if the given mining has a non-null label and is not a un-resolved
-	 * {@linkplain IPlaceholderCodeMining}
+	 * Returns {@code true} if the given mining is a {@linkplain IPlaceholderCodeMining} and not
+	 * resolved and {@code false} otherwise
 	 *
 	 * @param mining the mining to check
-	 * @return {@code true}, if the mining is not a {@linkplain IPlaceholderCodeMining} or is
-	 *         resolved.
+	 * @return {@code true}, if the mining is a {@linkplain IPlaceholderCodeMining} and is not
+	 *         resolved. {@code false} otherwise.
 	 */
-	static boolean isNotUnresolvedPlaceholder(ICodeMining mining) {
-		return !(mining instanceof IPlaceholderCodeMining) || mining.isResolved();
+	static boolean isUnresolvedPlaceholder(ICodeMining mining) {
+		return mining instanceof IPlaceholderCodeMining && !mining.isResolved();
+	}
+
+	/**
+	 * Return the label of the code mining. If the label is {@code null} and the mining is an
+	 * unresolved {@link IPlaceholderCodeMining}, then the
+	 * {@linkplain IPlaceholderCodeMining#getPlaceholderLabel() placeholder label} is returned.
+	 *
+	 * @param mining the mining
+	 * @return The label, or the placeholder if {@code null} and not resolved
+	 */
+	static String getLabelOrPlaceholder(ICodeMining mining) {
+		String label= mining.getLabel();
+
+		if (label == null && mining instanceof IPlaceholderCodeMining placeHolderMining && !mining.isResolved()) {
+			return placeHolderMining.getPlaceholderLabel();
+		}
+
+		return label;
 	}
 
 	/**

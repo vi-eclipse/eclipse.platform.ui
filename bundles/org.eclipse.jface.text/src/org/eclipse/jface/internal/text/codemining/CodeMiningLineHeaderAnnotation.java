@@ -96,7 +96,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 
 	public int getHeight(GC gc) {
 		List<ICodeMining> minings= fMinings;
-		return hasAtLeastOneMiningNotEmpty(minings, fResolvedMinings) ? getMultilineHeight(gc, minings, super.getTextWidget(), super.getHeight()) : 0;
+		return hasAtLeastOneDrawableMining(minings, fResolvedMinings) ? getMultilineHeight(gc, minings, super.getTextWidget(), super.getHeight()) : 0;
 	}
 
 	private static String firstLine(String label) {
@@ -115,7 +115,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 		int sumLineHeight= 0;
 		for (int i= 0; i < minings.size(); i++) {
 			ICodeMining mining= minings.get(i);
-			String label= mining.getLabel();
+			String label= CodeMiningManager.getLabelOrPlaceholder(mining);
 			if (label == null) {
 				continue;
 			}
@@ -156,7 +156,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 				sumLineHeight+= styledTextLineHeight + styledText.getLineSpacing();
 			} else {
 				if (j == splitted.length - 1 && miningIndex + 1 < minings.size()) { // last line, take first line from next mining
-					String nextLabel= minings.get(miningIndex + 1).getLabel();
+					String nextLabel= CodeMiningManager.getLabelOrPlaceholder(minings.get(miningIndex + 1));
 					if (nextLabel != null) {
 						String firstFromNext= firstLine(nextLabel);
 						line+= firstFromNext;
@@ -176,11 +176,10 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 	 * @return <code>true</code> if the annotation has at least one mining which has a non-empty
 	 *         label and <code>false</code> otherwise.
 	 */
-	static boolean hasAtLeastOneMiningNotEmpty(List<ICodeMining> minings, ICodeMining[] resolvedMinings) {
+	static boolean hasAtLeastOneDrawableMining(List<ICodeMining> minings, ICodeMining[] resolvedMinings) {
 		for (ICodeMining mining : minings) {
-			String label= mining.getLabel();
-			if (label != null && !label.isEmpty()) {
-				return true; // will be marked resolved or is a placeholder
+			if (CodeMiningManager.isDrawableMining(mining)) {
+				return true;
 			}
 		}
 
@@ -188,7 +187,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 			return false;
 		}
 		for (ICodeMining resolved : resolvedMinings) {
-			if (CodeMiningManager.isValidMining(resolved)) {
+			if (CodeMiningManager.isDrawableMining(resolved)) {
 				return true;
 			}
 		}
@@ -207,7 +206,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 		int length= Math.min(oldMinings.size(), minings.size());
 		for (int i= 0; i < length; i++) {
 			ICodeMining mining= oldMinings.get(i);
-			if (mining.getLabel() != null && CodeMiningManager.isNotUnresolvedPlaceholder(mining)) {
+			if (mining.getLabel() != null) {
 				resolvedMinings[i]= mining;
 			}
 		}
@@ -249,14 +248,10 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 			ICodeMining mining= minings.get(i);
 			// try to get the last resolved mining.
 			ICodeMining lastResolvedMining= (fResolvedMinings != null && fResolvedMinings.length > i) ? fResolvedMinings[i] : null;
-			if (mining.getLabel() != null) {
-				if (CodeMiningManager.isNotUnresolvedPlaceholder(mining)) {
-					// mining is resolved without error, update the resolved mining list
-					if (fResolvedMinings != null && fResolvedMinings.length > i) {
-						fResolvedMinings[i]= mining;
-					}
-				} else {
-					if (mining.getLabel().isEmpty()) {
+			String label= CodeMiningManager.getLabelOrPlaceholder(mining);
+			if (label != null) {
+				if (CodeMiningManager.isUnresolvedPlaceholder(mining)) {
+					if (label.isEmpty()) {
 						mining= lastResolvedMining;
 					}
 
@@ -264,6 +259,11 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 						// redraw the annotation when mining is resolved.
 						redrawRunnable.run();
 						redrawn= true;
+					}
+				} else {
+					// mining is resolved without error, update the resolved mining list
+					if (fResolvedMinings != null && fResolvedMinings.length > i) {
+						fResolvedMinings[i]= mining;
 					}
 				}
 			} else if (!mining.isResolved()) {
@@ -278,7 +278,7 @@ public class CodeMiningLineHeaderAnnotation extends LineHeaderAnnotation impleme
 				// the mining is resolved with error, draw the last resolved mining
 				mining= lastResolvedMining;
 			}
-			if (!CodeMiningManager.isValidMining(mining)) {
+			if (!CodeMiningManager.isDrawableMining(mining)) {
 				// ignore the draw of mining
 				continue;
 			}

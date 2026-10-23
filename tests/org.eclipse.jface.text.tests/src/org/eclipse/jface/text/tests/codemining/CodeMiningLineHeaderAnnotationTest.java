@@ -300,7 +300,7 @@ public class CodeMiningLineHeaderAnnotationTest {
 
 			@Override
 			public Point draw(GC gc, StyledText textWidget, Color color, int x, int y) {
-				labelDrawn.complete(getLabel());
+				labelDrawn.complete(getLabelOrPlaceholder());
 				return super.draw(gc, textWidget, color, x, y);
 			}
 
@@ -394,9 +394,11 @@ public class CodeMiningLineHeaderAnnotationTest {
 
 	private static class UnresolvedPlaceholderMining extends LineHeaderCodeMining implements IPlaceholderCodeMining {
 
+		private final String placeholderLabel;
+
 		public UnresolvedPlaceholderMining(int beforeLineNumber, IDocument document, ICodeMiningProvider provider, String label) throws BadLocationException {
 			super(beforeLineNumber, document, provider);
-			setLabel(label);
+			this.placeholderLabel= label;
 		}
 
 		@Override
@@ -404,13 +406,25 @@ public class CodeMiningLineHeaderAnnotationTest {
 			return false;
 		}
 
+		@Override
+		public String getPlaceholderLabel() {
+			return placeholderLabel;
+		}
+
 	}
 
 	private static class ResolvablePlaceholderMining extends LineHeaderCodeMining implements IPlaceholderCodeMining {
 
+		private final String placeholderLabel;
+
 		public ResolvablePlaceholderMining(int beforeLineNumber, IDocument document, ICodeMiningProvider provider, String placeholder) throws BadLocationException {
 			super(beforeLineNumber, document, provider);
-			setLabel(placeholder);
+			this.placeholderLabel= placeholder;
+		}
+
+		@Override
+		public String getPlaceholderLabel() {
+			return placeholderLabel;
 		}
 
 	}
